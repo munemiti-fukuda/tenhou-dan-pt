@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         天鳳 観戦欄 段位pt表示
 // @namespace    https://example.com/
-// @version      0.3
-// @description  観戦一覧の段位の横に、nodocchiの段位ランキングから段位ptを表示する
+// @version      0.4
+// @description  観戦一覧の段位の横に、nodocchiの段位ランキングから段位ptを表示する(天鳳位は非表示)
 // @match        https://tenhou.net/3/*
 // @match        https://tenhou.net/4/*
 // @grant        GM_xmlhttpRequest
@@ -10,6 +10,8 @@
 // @grant        GM_setValue
 // @connect      nodocchi.moe
 // @run-at       document-start
+// @updateURL    https://raw.githubusercontent.com/munemiti-fukuda/tenhou-dan-pt/main/tenhou-dan-pt.user.js
+// @downloadURL  https://raw.githubusercontent.com/munemiti-fukuda/tenhou-dan-pt/main/tenhou-dan-pt.user.js
 // ==/UserScript==
 
 (function () {
@@ -19,14 +21,14 @@
   const TTL = 5 * 60 * 1000;    // この時間を過ぎたら裏で取り直す
   const RETRY = 30 * 1000;      // 失敗時の再試行間隔
   const MARK = 'th-pt';
-  const KEY = 'th-pt-cache';
+  const KEY = 'th-pt-cache2';   // 旧版(th-pt-cache)のキャッシュは使わない
+  const GRADE_TENHOUI = 20;     // APIで天鳳位を表すgrade(2200pt固定なので表示しない)
 
   // /3/ は a.bt3 の中、/4/ は table.bt3 の中に段位の表示がある
-
   const DAN_SELECTOR = 'a.bt3 span[class^="dan"], table.bt3 span[class^="dan"]';
 
   const style = document.createElement('style');
-   style.textContent = `.${MARK}{font-size:.6em;color:inherit;margin:0 .2em;white-space:nowrap;}`;
+  style.textContent = `.${MARK}{font-size:.6em;color:inherit;margin:0 .2em;white-space:nowrap;}`;
   (document.head || document.documentElement).appendChild(style);
 
   // data[n] = { time, map: Map(名前 -> pt) }  (n は 3 か 4)
@@ -53,6 +55,13 @@
     } catch (e) { /* 無視 */ }
   }
 
+  function fail(n) {
+    const s = state[n];
+    s.retryAt = Date.now() + RETRY;
+    s.loading = false;
+    setTimeout(apply, RETRY + 100);   // DOMが静止していても再試行されるようにする
+  }
+
   function fetchData(n) {
     const s = state[n];
     if (s.loading || Date.now() < s.retryAt) return;
@@ -66,17 +75,20 @@
         try {
           const list = JSON.parse(res.responseText);
           const map = new Map();
-          for (const p of list) map.set(p.username, p.pt);
+          for (const p of list) {
+            if (p.grade === GRADE_TENHOUI) continue;   // 天鳳位は表示しない
+            map.set(p.username, p.pt);
+          }
           data[n] = { time: Date.now(), map };
           save();
+          s.loading = false;
+          apply();
         } catch (e) {
-          s.retryAt = Date.now() + RETRY;
+          fail(n);
         }
-        s.loading = false;
-        apply();
       },
-      onerror() { s.retryAt = Date.now() + RETRY; s.loading = false; },
-      ontimeout() { s.retryAt = Date.now() + RETRY; s.loading = false; },
+      onerror() { fail(n); },
+      ontimeout() { fail(n); },
     });
   }
 
@@ -107,7 +119,7 @@
         if (!nameNode || nameNode.nodeType !== 3) return;
 
         const pt = d.map.get(nameNode.nodeValue.trim());
-        if (pt === undefined) return;
+        if (pt === undefined) return;                        // 天鳳位などデータにない人は何も出さない
 
         const sp = document.createElement('span');
         sp.className = MARK;
