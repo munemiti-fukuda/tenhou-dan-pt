@@ -21,8 +21,12 @@
   const TTL = 5 * 60 * 1000;    // この時間を過ぎたら裏で取り直す
   const RETRY = 30 * 1000;      // 失敗時の再試行間隔
   const MARK = 'th-pt';
-  const KEY = 'th-pt-cache2';   // 旧版(th-pt-cache)のキャッシュは使わない
+  const KEY = 'th-pt-cache3';   // 旧版のキャッシュは使わない
   const GRADE_TENHOUI = 20;     // APIで天鳳位を表すgrade(2200pt固定なので表示しない)
+
+  // ptを表示する最低段位(APIのgrade: 17=八段, 18=九段, 19=十段, 20=天鳳位)
+  // 八段から表示したい場合は 17 に変更してください
+  const MIN_GRADE = 18;
 
   // /3/ は a.bt3 の中、/4/ は table.bt3 の中に段位の表示がある
   const DAN_SELECTOR = 'a.bt3 span[class^="dan"], table.bt3 span[class^="dan"]';
@@ -77,7 +81,7 @@
           const map = new Map();
           for (const p of list) {
             if (p.grade === GRADE_TENHOUI) continue;   // 天鳳位は表示しない
-            map.set(p.username, p.pt);
+            map.set(p.username, { pt: p.pt, grade: p.grade });
           }
           data[n] = { time: Date.now(), map };
           save();
@@ -118,12 +122,13 @@
         const nameNode = slash && slash.nextSibling;         // 名前のテキスト
         if (!nameNode || nameNode.nodeType !== 3) return;
 
-        const pt = d.map.get(nameNode.nodeValue.trim());
-        if (pt === undefined) return;                        // 天鳳位などデータにない人は何も出さない
+        const info = d.map.get(nameNode.nodeValue.trim());
+        if (!info) return;                                   // 天鳳位などデータにない人は何も出さない
+        if (info.grade < MIN_GRADE) return;                  // 設定した段位未満は出さない
 
         const sp = document.createElement('span');
         sp.className = MARK;
-        sp.textContent = pt + 'pt';
+        sp.textContent = info.pt + 'pt';
         sp.title = '推定段位pt(nodocchi.moe)';
         dan.after(sp);
       });
