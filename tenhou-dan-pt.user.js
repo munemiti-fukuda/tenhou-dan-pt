@@ -3,7 +3,7 @@
 // @namespace    https://github.com/munemiti-fukuda/
 // @author       munemiti-fukuda
 // @homepage     https://github.com/munemiti-fukuda/tenhou-dan-pt
-// @version      0.6  
+// @version      0.6
 // @description  観戦一覧の段位の横に、nodocchiの段位ランキングから段位ptを表示する(天鳳位は非表示)
 // @match        https://tenhou.net/3/*
 // @match        https://tenhou.net/4/*
