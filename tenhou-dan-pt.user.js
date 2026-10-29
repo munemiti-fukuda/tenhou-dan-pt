@@ -1,10 +1,8 @@
 // ==UserScript==
 // @name         天鳳 観戦欄 段位pt表示
-// @namespace    https://github.com/munemiti-fukuda/
+// @namespace    https://example.com/
 // @version      0.4
 // @description  観戦一覧の段位の横に、nodocchiの段位ランキングから段位ptを表示する(天鳳位は非表示)
-// @author       munemiti-fukuda
-// @homepage     https://github.com/munemiti-fukuda/tenhou-dan-pt
 // @match        https://tenhou.net/3/*
 // @match        https://tenhou.net/4/*
 // @grant        GM_xmlhttpRequest
@@ -22,11 +20,13 @@
   const RG = 180;               // APIのrgパラメータ(ページが使っていた値)
   const TTL = 5 * 60 * 1000;    // この時間を過ぎたら裏で取り直す
   const RETRY = 30 * 1000;      // 失敗時の再試行間隔
+  const MAX_AGE = 24 * 60 * 60 * 1000;   // これより古い保存データは使わない
   const MARK = 'th-pt';
   const KEY = 'th-pt-cache3';   // 旧版のキャッシュは使わない
   const GRADE_TENHOUI = 20;     // APIで天鳳位を表すgrade(2200pt固定なので表示しない)
 
   // ptを表示する最低段位(APIのgrade: 17=八段, 18=九段, 19=十段, 20=天鳳位)
+  // 八段から表示したい場合は 17 に変更してください
   const MIN_GRADE = 18;
 
   // /3/ は a.bt3 の中、/4/ は table.bt3 の中に段位の表示がある
@@ -45,7 +45,9 @@
     const saved = JSON.parse(GM_getValue(KEY, 'null'));
     if (saved) {
       [3, 4].forEach((n) => {
-        if (saved[n]) data[n] = { time: saved[n].time, map: new Map(saved[n].list) };
+        if (saved[n] && Date.now() - saved[n].time < MAX_AGE) {
+          data[n] = { time: saved[n].time, map: new Map(saved[n].list) };
+        }
       });
     }
   } catch (e) { /* 無視 */ }
@@ -113,7 +115,8 @@
         const table = dan.closest('table');
         const head = table && table.querySelector('td[colspan]');
         const m = head && head.textContent.match(/([三四])[般上特鳳]/);
-        const n = m && m[1] === '三' ? 3 : 4;
+        if (!m) return;                                      // 判定できなければ表示しない
+        const n = m[1] === '三' ? 3 : 4;
 
         const d = data[n];
         if (!d || Date.now() - d.time > TTL) fetchData(n);   // 古ければ裏で更新
