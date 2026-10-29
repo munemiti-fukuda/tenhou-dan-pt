@@ -1,6 +1,8 @@
 // ==UserScript==
 // @name         天鳳 観戦欄 段位pt表示
-// @namespace    https://example.com/
+// @namespace    https://github.com/munemiti-fukuda/
+// @author       munemiti-fukuda
+// @homepage     https://github.com/munemiti-fukuda/tenhou-dan-pt
 // @version      0.5
 // @description  観戦一覧の段位の横に、nodocchiの段位ランキングから段位ptを表示する(天鳳位は非表示)
 // @match        https://tenhou.net/3/*
