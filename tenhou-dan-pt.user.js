@@ -3,7 +3,7 @@
 // @namespace    https://github.com/munemiti-fukuda/
 // @author       munemiti-fukuda
 // @homepage     https://github.com/munemiti-fukuda/tenhou-dan-pt
-// @version      0.7
+// @version      0.8
 // @description  観戦一覧の段位の横に、nodocchiの段位ランキングから段位ptを表示する(天鳳位は非表示)
 // @match        https://tenhou.net/3/*
 // @match        https://tenhou.net/4/*
@@ -19,17 +19,20 @@
 (function () {
   'use strict';
 
-  const RG = 180;               // APIのrgパラメータ(ページが使っていた値)
-  const TTL = 5 * 60 * 1000;    // この時間を過ぎたら裏で取り直す
-  const RETRY = 30 * 1000;      // 失敗時の再試行間隔
-  const MAX_AGE = 24 * 60 * 60 * 1000;   // これより古い保存データは使わない
+  const RG = 180;                          // APIのrgパラメータ(ページが使っていた値)
+  const TTL = 60 * 60 * 1000;              // この時間を過ぎたら裏で取り直す(1時間)
+  const RETRY_BASE = 60 * 1000;            // 失敗時の最初の待ち時間(以後2倍ずつ増える)
+  const RETRY_MAX = 30 * 60 * 1000;        // 失敗時の待ち時間の上限
+  const MAX_AGE = 24 * 60 * 60 * 1000;     // これより古い保存データは使わない
+  const LOCK_MS = 30 * 1000;               // 他のタブが取得中とみなす時間
   const MARK = 'th-pt';
-  const KEY = 'th-pt-cache3';   // 旧版のキャッシュは使わない
-  const GRADE_TENHOUI = 20;     // APIで天鳳位を表すgrade(2200pt固定なので表示しない)
+  const KEY = 'th-pt-cache3';              // 旧版のキャッシュは使わない
+  const LOCK_KEY = 'th-pt-lock';
+  const GRADE_TENHOUI = 20;                // APIで天鳳位を表すgrade(2200pt固定なので表示しない)
 
   // ptを表示する最低段位(APIのgrade: 17=八段, 18=九段, 19=十段, 20=天鳳位)
-  // 八段から表示したい場合は 17 に変更してください
-  const MIN_GRADE = 18;
+  // 九段以上だけ表示したい場合は 18 に変更してください
+  const MIN_GRADE = 17;
 
   // /3/ は a.bt3 の中、/4/ は table.bt3 の中に段位の表示がある
   const DAN_SELECTOR = 'a.bt3 span[class^="dan"], table.bt3 span[class^="dan"]';
@@ -38,42 +41,74 @@
   style.textContent = `.${MARK}{font-size:.6em;color:inherit;margin:0 .2em;white-space:nowrap;}`;
   (document.head || document.documentElement).appendChild(style);
 
-  // data[n] = { time, map: Map(名前 -> pt) }  (n は 3 か 4)
+  // data[n] = { time, map: Map(名前 -> {pt, grade}) }  (n は 3 か 4)
   const data = { 3: null, 4: null };
-  const state = { 3: { loading: false, retryAt: 0 }, 4: { loading: false, retryAt: 0 } };
+  const state = {
+    3: { loading: false, retryAt: 0, fails: 0 },
+    4: { loading: false, retryAt: 0, fails: 0 },
+  };
 
-  // 前回の結果を読み込む(開き直してもすぐ表示できるように)
-  try {
-    const saved = JSON.parse(GM_getValue(KEY, 'null'));
-    if (saved) {
-      [3, 4].forEach((n) => {
-        if (saved[n] && Date.now() - saved[n].time < MAX_AGE) {
-          data[n] = { time: saved[n].time, map: new Map(saved[n].list) };
-        }
-      });
-    }
-  } catch (e) { /* 無視 */ }
-
-  function save() {
+  // 保存データを読み込む(開き直したときや、他のタブが取得したときにも使う)
+  // 返り値: 手元のデータがTTL以内ならtrue
+  function syncFromStorage(n) {
     try {
-      const o = {};
-      [3, 4].forEach((n) => {
-        if (data[n]) o[n] = { time: data[n].time, list: Array.from(data[n].map) };
-      });
-      GM_setValue(KEY, JSON.stringify(o));
-    } catch (e) { /* 無視 */ }
+      const saved = JSON.parse(GM_getValue(KEY, 'null'));
+      const e = saved && saved[n];
+      if (e && (!data[n] || e.time > data[n].time) && Date.now() - e.time < MAX_AGE) {
+        data[n] = { time: e.time, map: new Map(e.list) };
+      }
+    } catch (err) { /* 無視 */ }
+    return !!data[n] && Date.now() - data[n].time <= TTL;
   }
+
+  // 自分が取得した分(n)だけを保存データに上書きする(他のタブの分は消さない)
+  function save(n) {
+    try {
+      let o = {};
+      try { o = JSON.parse(GM_getValue(KEY, '{}')) || {}; } catch (err) { o = {}; }
+      if (data[n]) o[n] = { time: data[n].time, list: Array.from(data[n].map) };
+      GM_setValue(KEY, JSON.stringify(o));
+    } catch (err) { /* 無視 */ }
+  }
+
+  // 複数タブが同時に取りに行かないようにする簡易ロック
+  function tryLock(n) {
+    try {
+      const t = GM_getValue(LOCK_KEY + n, 0);
+      if (Date.now() - t < LOCK_MS) return false;
+      GM_setValue(LOCK_KEY + n, Date.now());
+    } catch (err) { /* 無視 */ }
+    return true;
+  }
+
+  [3, 4].forEach(syncFromStorage);
 
   function fail(n) {
     const s = state[n];
-    s.retryAt = Date.now() + RETRY;
+    s.fails += 1;
+    const wait = Math.min(RETRY_BASE * Math.pow(2, s.fails - 1), RETRY_MAX);   // 60秒→120秒→…→最大30分
+    s.retryAt = Date.now() + wait;
     s.loading = false;
-    setTimeout(apply, RETRY + 100);   // DOMが静止していても再試行されるようにする
+    setTimeout(apply, wait + 100);   // DOMが静止していても再試行されるようにする
   }
 
   function fetchData(n) {
     const s = state[n];
     if (s.loading || Date.now() < s.retryAt) return;
+
+    // 他のタブがすでに新しいデータを保存していれば、それを使う
+    if (syncFromStorage(n)) {
+      setTimeout(apply, 0);
+      return;
+    }
+
+    // 他のタブが取得中なら、少し待ってから保存データを見に来る
+    if (!tryLock(n)) {
+      s.retryAt = Date.now() + 3000;
+      setTimeout(apply, 3100);
+      return;
+    }
+
     s.loading = true;
 
     GM_xmlhttpRequest({
@@ -81,15 +116,19 @@
       url: `https://nodocchi.moe/api/graderank.php?playernum=${n}&orderby=0&rg=${RG}`,
       timeout: 20000,
       onload(res) {
+        if (res.status !== 200) { fail(n); return; }   // 429/403/5xxなどは失敗として扱う
         try {
           const list = JSON.parse(res.responseText);
+          if (!Array.isArray(list)) { fail(n); return; }
           const map = new Map();
           for (const p of list) {
             if (p.grade === GRADE_TENHOUI) continue;   // 天鳳位は表示しない
             map.set(p.username, { pt: p.pt, grade: p.grade });
           }
           data[n] = { time: Date.now(), map };
-          save();
+          save(n);
+          s.fails = 0;
+          s.retryAt = 0;
           s.loading = false;
           apply();
         } catch (e) {
