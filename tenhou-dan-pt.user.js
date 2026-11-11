@@ -38,7 +38,7 @@
   const DAN_SELECTOR = 'a.bt3 span[class^="dan"], table.bt3 span[class^="dan"]';
 
   const style = document.createElement('style');
-  style.textContent = `.${MARK}{font-size:.6em;color:inherit;margin:0 .2em;white-space:nowrap;}`;
+    style.textContent = `.${MARK}{font-size:.6em;color:inherit;margin:0 .2em;white-space:nowrap;} .bt3 td{white-space:nowrap;}`;
   (document.head || document.documentElement).appendChild(style);
 
   // data[n] = { time, map: Map(名前 -> {pt, grade}) }  (n は 3 か 4)
